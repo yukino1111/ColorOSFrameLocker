@@ -1,0 +1,38 @@
+# Gradle files
+.gradle/
+.kotlin/
+build/
+app/build/
+
+# Local configuration file (SDK path, etc.)
+local.properties
+
+# Android Studio
+.idea/
+*.iws
+*.ipr
+*.iml
+
+# Log/OS Files
+.DS_Store
+*.log
+
+# NDK/CMake
+.cxx/
+.externalNativeBuild/
+
+# Output and generated files
+captures/
+outputs/
+test-output/
+
+# Keystore & APK files
+*.jks
+*.keystore
+keystore.properties
+*.apk
+
+# Temporary files
+*.tmp
+*.temp
+CLAUDE.md

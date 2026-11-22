@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ColorOSFrameLocker</string>
+    <string name="xposed_description">适配 ColorOS 16 手机与平板的高刷锁定模块：自动匹配面板最高刷新率，接管投票、ADFR、AppSwitchBoost 与 TouchIdle</string>
+</resources>

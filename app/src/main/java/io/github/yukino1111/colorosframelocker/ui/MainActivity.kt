@@ -48,6 +48,8 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -60,12 +62,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.libxposed.service.XposedService
-import io.github.libxposed.service.XposedServiceHelper
 import io.github.yukino1111.colorosframelocker.BuildConfig
+import io.github.yukino1111.colorosframelocker.FrameworkState
 import io.github.yukino1111.colorosframelocker.LockerConfig
 import io.github.yukino1111.colorosframelocker.PrefsContract
 import io.github.yukino1111.colorosframelocker.R
+import io.github.yukino1111.colorosframelocker.ScopeRequestResult
+import io.github.yukino1111.colorosframelocker.XposedServiceManager
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -77,80 +80,39 @@ private data class DisplayStatusSnapshot(
     val supportedHzOptions: List<Int> = listOf(144, 120, 90, 60),
 )
 
-private sealed interface ScopeRequestResult {
-    data object Approved : ScopeRequestResult
-    data class Failed(val reason: String) : ScopeRequestResult
-}
-
-private data class FrameworkState(
-    val bound: Boolean = false,
-    val frameworkInfo: String = "",
-    val hasSystemScope: Boolean = false,
-    val scopeResult: ScopeRequestResult? = null,
-)
-
 class MainActivity : ComponentActivity() {
-    private val mainHandler = Handler(Looper.getMainLooper())
-
     private var config by mutableStateOf(LockerConfig())
-    private var frameworkState by mutableStateOf(FrameworkState())
     private var displaySnapshot by mutableStateOf(DisplayStatusSnapshot())
     private var language by mutableStateOf(AppLanguage.ZH)
 
-    @Volatile
-    private var xposedService: XposedService? = null
-
-    @Volatile
-    private var remotePrefs: SharedPreferences? = null
-
     private val uiPrefs by lazy {
         getSharedPreferences(UI_PREFS_NAME, MODE_PRIVATE)
-    }
-
-    private val serviceListener = object : XposedServiceHelper.OnServiceListener {
-        override fun onServiceBind(service: XposedService) {
-            val prefs = runCatching { service.getRemotePreferences(PrefsContract.PREFS_NAME) }.getOrNull()
-            val scope = runCatching { service.getScope() }.getOrDefault(emptyList())
-            val info = "${service.frameworkName} ${service.frameworkVersion} (API ${service.apiVersion})"
-            mainHandler.post {
-                xposedService = service
-                remotePrefs = prefs
-                if (prefs != null) {
-                    config = LockerConfig.from(prefs)
-                }
-                frameworkState = FrameworkState(
-                    bound = true,
-                    frameworkInfo = info,
-                    hasSystemScope = scope.contains("system"),
-                    scopeResult = null,
-                )
-            }
-        }
-
-        override fun onServiceDied(service: XposedService) {
-            mainHandler.post {
-                if (xposedService === service) {
-                    xposedService = null
-                    remotePrefs = null
-                }
-                frameworkState = FrameworkState(bound = false)
-            }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        XposedServiceManager.ensureRegistered()
         language = AppLanguage.fromCode(
             code = uiPrefs.getString(KEY_LANGUAGE, null),
             defaultZh = Locale.getDefault().language.startsWith("zh"),
         )
-        config = LockerConfig.from(getSharedPreferences(PrefsContract.PREFS_NAME, MODE_PRIVATE))
+        config = LockerConfig.from(
+            XposedServiceManager.currentRemotePrefs()
+                ?: getSharedPreferences(PrefsContract.PREFS_NAME, MODE_PRIVATE),
+        )
         refreshDisplaySnapshot()
-        XposedServiceHelper.registerListener(serviceListener)
 
         setContent {
+            val frameworkState by XposedServiceManager.frameworkState.collectAsState()
+            val activeRemotePrefs by XposedServiceManager.remotePrefs.collectAsState()
+            LaunchedEffect(activeRemotePrefs) {
+                activeRemotePrefs?.let { prefs ->
+                    config = LockerConfig.from(prefs)
+                }
+            }
+
             val dark = isSystemInDarkTheme()
             val colors = if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
             val strings = stringsFor(language)
@@ -162,12 +124,18 @@ class MainActivity : ComponentActivity() {
                         displaySnapshot = displaySnapshot,
                         onToggleLanguage = ::toggleLanguage,
                         onUpdateConfig = ::saveConfig,
-                        onRequestSystemScope = ::requestSystemScope,
+                        onRequestSystemScope = XposedServiceManager::requestSystemScope,
                         onRefreshDisplay = ::refreshDisplaySnapshot,
                     )
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        XposedServiceManager.refreshScope()
+        refreshDisplaySnapshot()
     }
 
     private fun toggleLanguage() {
@@ -202,7 +170,7 @@ class MainActivity : ComponentActivity() {
     private fun saveConfig(updated: LockerConfig) {
         config = updated
         writeToPrefs(getSharedPreferences(PrefsContract.PREFS_NAME, MODE_PRIVATE), updated)
-        remotePrefs?.let { writeToPrefs(it, updated) }
+        XposedServiceManager.currentRemotePrefs()?.let { writeToPrefs(it, updated) }
     }
 
     private fun writeToPrefs(prefs: SharedPreferences, cfg: LockerConfig) {
@@ -218,32 +186,6 @@ class MainActivity : ComponentActivity() {
             .putBoolean(PrefsContract.KEY_ALLOW_SAFETY_LIMITS, cfg.allowSafetyLimits)
             .putBoolean(PrefsContract.KEY_RESPECT_LOW_POWER, cfg.respectLowPower)
             .apply()
-    }
-
-    private fun requestSystemScope() {
-        val service = xposedService ?: return
-        service.requestScope(
-            listOf("system"),
-            object : XposedService.OnScopeEventListener {
-                override fun onScopeRequestApproved(approved: MutableList<String>) {
-                    mainHandler.post {
-                        frameworkState = frameworkState.copy(
-                            hasSystemScope = approved.contains("system") ||
-                                service.getScope().contains("system"),
-                            scopeResult = ScopeRequestResult.Approved,
-                        )
-                    }
-                }
-
-                override fun onScopeRequestFailed(message: String) {
-                    mainHandler.post {
-                        frameworkState = frameworkState.copy(
-                            scopeResult = ScopeRequestResult.Failed(message),
-                        )
-                    }
-                }
-            },
-        )
     }
 
     companion object {

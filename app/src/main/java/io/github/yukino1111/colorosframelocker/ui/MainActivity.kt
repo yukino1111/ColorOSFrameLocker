@@ -1,16 +1,32 @@
 package io.github.yukino1111.colorosframelocker.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.hardware.display.DisplayManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Display
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -26,25 +42,29 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonGroupDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -52,16 +72,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.drawable.toBitmap
 import io.github.yukino1111.colorosframelocker.BuildConfig
 import io.github.yukino1111.colorosframelocker.FrameworkState
 import io.github.yukino1111.colorosframelocker.LockerConfig
@@ -69,6 +95,7 @@ import io.github.yukino1111.colorosframelocker.PrefsContract
 import io.github.yukino1111.colorosframelocker.R
 import io.github.yukino1111.colorosframelocker.ScopeRequestResult
 import io.github.yukino1111.colorosframelocker.XposedServiceManager
+import io.github.yukino1111.colorosframelocker.ui.theme.FrameLockerTheme
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -113,10 +140,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            val dark = isSystemInDarkTheme()
-            val colors = if (dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
             val strings = stringsFor(language)
-            MaterialTheme(colorScheme = colors) {
+            FrameLockerTheme {
                 CompositionLocalProvider(LocalAppStrings provides strings) {
                     FrameLockerScreen(
                         config = config,
@@ -194,7 +219,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun FrameLockerScreen(
     config: LockerConfig,
@@ -207,6 +232,11 @@ private fun FrameLockerScreen(
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val motionScheme = MaterialTheme.motionScheme
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    var showAboutDialog by remember { mutableStateOf(false) }
+
     DisposableEffect(context) {
         val dm = context.getSystemService(DisplayManager::class.java)
         val listener = object : DisplayManager.DisplayListener {
@@ -225,61 +255,64 @@ private fun FrameLockerScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+                scrollBehavior = scrollBehavior,
                 title = {
-                    Column {
-                        Text(
-                            text = strings.appTitle,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            text = "v${BuildConfig.VERSION_NAME} · ${Build.MODEL}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
-                actions = {
-                    FilledTonalButton(
-                        onClick = onToggleLanguage,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                        modifier = Modifier
-                            .height(32.dp)
-                            .semantics { contentDescription = strings.languageSwitchCd },
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_translate_24),
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = strings.languageSwitchLabel,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    val (label, container) = when {
-                        !frameworkState.bound -> strings.statusNotBound to MaterialTheme.colorScheme.errorContainer
-                        !frameworkState.hasSystemScope -> strings.statusMissingSystem to MaterialTheme.colorScheme.tertiaryContainer
-                        else -> strings.statusActive to MaterialTheme.colorScheme.primaryContainer
-                    }
-                    Surface(
-                        color = container,
-                        shape = RoundedCornerShape(50),
-                        modifier = Modifier.padding(end = 16.dp),
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            maxLines = 1,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .combinedClickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {},
+                                    onLongClick = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        showAboutDialog = true
+                                    },
+                                ),
+                        ) {
+                            Text(
+                                text = strings.appTitle,
+                                style = MaterialTheme.typography.titleLargeEmphasized,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME} · ${Build.MODEL}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        FilledTonalButton(
+                            onClick = onToggleLanguage,
+                            shapes = ButtonDefaults.shapes(),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .semantics { contentDescription = strings.languageSwitchCd },
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_translate_24),
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = strings.languageSwitchLabel,
+                                style = MaterialTheme.typography.labelMediumEmphasized,
+                            )
+                        }
                     }
                 },
             )
@@ -290,12 +323,106 @@ private fun FrameLockerScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp)),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .animateContentSize(animationSpec = motionScheme.defaultSpatialSpec()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ElevatedCard(
+            val isActive = frameworkState.bound && frameworkState.hasSystemScope
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.elevatedCardColors(
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isActive) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            painter = painterResource(
+                                if (isActive) R.drawable.ic_check_circle_24 else R.drawable.ic_warning_24,
+                            ),
+                            contentDescription = null,
+                            tint = if (isActive) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onErrorContainer
+                            },
+                            modifier = Modifier.size(26.dp),
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = when {
+                                    isActive -> strings.statusActive
+                                    !frameworkState.bound -> strings.frameworkMissingTitle
+                                    else -> strings.scopeRequiredTitle
+                                },
+                                style = MaterialTheme.typography.titleMediumEmphasized,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                },
+                            )
+                            Text(
+                                text = when {
+                                    isActive -> {
+                                        if (frameworkState.frameworkInfo.isNotEmpty()) {
+                                            "${strings.statusActiveBody} · ${frameworkState.frameworkInfo}"
+                                        } else {
+                                            strings.statusActiveBody
+                                        }
+                                    }
+                                    !frameworkState.bound -> strings.frameworkMissingBody
+                                    else -> strings.scopeRequiredBody
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onErrorContainer
+                                },
+                            )
+                        }
+                    }
+                    if (frameworkState.bound && !frameworkState.hasSystemScope) {
+                        Button(
+                            onClick = onRequestSystemScope,
+                            shapes = ButtonDefaults.shapes(),
+                        ) {
+                            Text(strings.requestScopeButton)
+                        }
+                    }
+                    frameworkState.scopeResult?.let { result ->
+                        val msg = when (result) {
+                            ScopeRequestResult.Approved -> strings.scopeApprovedMsg
+                            is ScopeRequestResult.Failed -> strings.scopeFailedMsg(result.reason)
+                        }
+                        Text(
+                            text = msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 ),
             ) {
@@ -307,7 +434,7 @@ private fun FrameLockerScreen(
                     ) {
                         Text(
                             text = strings.liveDisplayTitle,
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelLargeEmphasized,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
@@ -324,8 +451,7 @@ private fun FrameLockerScreen(
                     ) {
                         Text(
                             text = "${displaySnapshot.currentHz.roundToInt()} Hz",
-                            style = MaterialTheme.typography.displaySmall,
-                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.displaySmallEmphasized,
                             maxLines = 1,
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -338,71 +464,17 @@ private fun FrameLockerScreen(
                             modifier = Modifier.padding(bottom = 6.dp),
                         )
                     }
-                    if (frameworkState.frameworkInfo.isNotEmpty()) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
-                        Text(
-                            text = frameworkState.frameworkInfo,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
             }
 
-            if (!frameworkState.bound || !frameworkState.hasSystemScope) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.elevatedCardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                    ),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = if (!frameworkState.bound) {
-                                strings.frameworkMissingTitle
-                            } else {
-                                strings.scopeRequiredTitle
-                            },
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Text(
-                            text = if (!frameworkState.bound) {
-                                strings.frameworkMissingBody
-                            } else {
-                                strings.scopeRequiredBody
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        if (frameworkState.bound && !frameworkState.hasSystemScope) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Button(onClick = onRequestSystemScope) {
-                                Text(strings.requestScopeButton)
-                            }
-                        }
-                        frameworkState.scopeResult?.let { result ->
-                            val msg = when (result) {
-                                ScopeRequestResult.Approved -> strings.scopeApprovedMsg
-                                is ScopeRequestResult.Failed -> strings.scopeFailedMsg(result.reason)
-                            }
-                            Text(
-                                text = msg,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                            )
-                        }
-                    }
-                }
-            }
-
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     ToggleRow(
                         title = strings.enableLockTitle,
@@ -413,10 +485,9 @@ private fun FrameLockerScreen(
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     Text(
                         text = strings.targetRefreshRateTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     ChipFlowRow {
                         FilterChip(
                             selected = config.targetHzMode == PrefsContract.TARGET_HZ_AUTO_MAX,
@@ -445,12 +516,20 @@ private fun FrameLockerScreen(
                 displaySnapshot.supportedHzOptions.firstOrNull() ?: 144
             }
 
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(animationSpec = motionScheme.defaultSpatialSpec()),
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = strings.touchIdleTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -459,56 +538,100 @@ private fun FrameLockerScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    ChipFlowRow {
-                        FilterChip(
-                            selected = config.idlePolicy == PrefsContract.IDLE_BLOCK,
-                            onClick = { onUpdateConfig(config.copy(idlePolicy = PrefsContract.IDLE_BLOCK)) },
-                            label = { Text(strings.idleBlockLabel) },
-                        )
-                        FilterChip(
-                            selected = config.idlePolicy == PrefsContract.IDLE_ALLOW_FLOOR,
-                            onClick = { onUpdateConfig(config.copy(idlePolicy = PrefsContract.IDLE_ALLOW_FLOOR)) },
-                            label = { Text(strings.idleAllowFloorLabel) },
-                        )
+                    val toggleColors = ToggleButtonDefaults.colors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        checkedContainerColor = MaterialTheme.colorScheme.primary,
+                        checkedContentColor = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween),
+                    ) {
+                        ToggleButton(
+                            checked = config.idlePolicy == PrefsContract.IDLE_BLOCK,
+                            onCheckedChange = {
+                                onUpdateConfig(config.copy(idlePolicy = PrefsContract.IDLE_BLOCK))
+                            },
+                            modifier = Modifier.weight(1f),
+                            shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
+                            colors = toggleColors,
+                        ) {
+                            Text(
+                                text = strings.idleBlockLabel,
+                                style = MaterialTheme.typography.labelLargeEmphasized,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        ToggleButton(
+                            checked = config.idlePolicy == PrefsContract.IDLE_ALLOW_FLOOR,
+                            onCheckedChange = {
+                                onUpdateConfig(config.copy(idlePolicy = PrefsContract.IDLE_ALLOW_FLOOR))
+                            },
+                            modifier = Modifier.weight(1f),
+                            shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                            colors = toggleColors,
+                        ) {
+                            Text(
+                                text = strings.idleAllowFloorLabel,
+                                style = MaterialTheme.typography.labelLargeEmphasized,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
 
-                    if (config.idlePolicy == PrefsContract.IDLE_ALLOW_FLOOR) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                        Text(
-                            text = strings.idleFloorTitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        val floorChoices = displaySnapshot.supportedHzOptions
-                            .filter { it <= effectiveTargetHz }
-                            .ifEmpty { displaySnapshot.supportedHzOptions }
-                        ChipFlowRow {
-                            FilterChip(
-                                selected = config.idleFloorHz == PrefsContract.IDLE_FLOOR_NATIVE,
-                                onClick = {
-                                    onUpdateConfig(config.copy(idleFloorHz = PrefsContract.IDLE_FLOOR_NATIVE))
-                                },
-                                label = { Text(strings.followSystemLabel) },
+                    AnimatedVisibility(
+                        visible = config.idlePolicy == PrefsContract.IDLE_ALLOW_FLOOR,
+                        enter = expandVertically(animationSpec = motionScheme.defaultSpatialSpec()) +
+                            fadeIn(animationSpec = motionScheme.defaultEffectsSpec()),
+                        exit = shrinkVertically(animationSpec = motionScheme.fastSpatialSpec()) +
+                            fadeOut(animationSpec = motionScheme.fastEffectsSpec()),
+                    ) {
+                        Column {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                            Text(
+                                text = strings.idleFloorTitle,
+                                style = MaterialTheme.typography.titleSmallEmphasized,
                             )
-                            floorChoices.forEach { hz ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val floorChoices = displaySnapshot.supportedHzOptions
+                                .filter { it <= effectiveTargetHz }
+                                .ifEmpty { displaySnapshot.supportedHzOptions }
+                            ChipFlowRow {
                                 FilterChip(
-                                    selected = config.idleFloorHz == hz,
-                                    onClick = { onUpdateConfig(config.copy(idleFloorHz = hz)) },
-                                    label = { Text("${hz}Hz") },
+                                    selected = config.idleFloorHz == PrefsContract.IDLE_FLOOR_NATIVE,
+                                    onClick = {
+                                        onUpdateConfig(config.copy(idleFloorHz = PrefsContract.IDLE_FLOOR_NATIVE))
+                                    },
+                                    label = { Text(strings.followSystemLabel) },
                                 )
+                                floorChoices.forEach { hz ->
+                                    FilterChip(
+                                        selected = config.idleFloorHz == hz,
+                                        onClick = { onUpdateConfig(config.copy(idleFloorHz = hz)) },
+                                        label = { Text("${hz}Hz") },
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
 
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = strings.thermalTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -516,7 +639,7 @@ private fun FrameLockerScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     val thermalChoices = displaySnapshot.supportedHzOptions
                         .filter { it in 60 until effectiveTargetHz }
                     ChipFlowRow {
@@ -545,12 +668,18 @@ private fun FrameLockerScreen(
                 }
             }
 
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.large,
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                ),
+            ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = strings.deepPolicyTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.titleSmallEmphasized,
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     ToggleRow(
@@ -559,28 +688,28 @@ private fun FrameLockerScreen(
                         checked = config.blockAdfr,
                         onCheckedChange = { onUpdateConfig(config.copy(blockAdfr = it)) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     ToggleRow(
                         title = strings.blockAppSwitchTitle,
                         subtitle = strings.blockAppSwitchSubtitle,
                         checked = config.blockAppSwitchDowngrade,
                         onCheckedChange = { onUpdateConfig(config.copy(blockAppSwitchDowngrade = it)) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     ToggleRow(
                         title = strings.ignorePencilTitle,
                         subtitle = strings.ignorePencilSubtitle,
                         checked = config.ignorePencilLimit,
                         onCheckedChange = { onUpdateConfig(config.copy(ignorePencilLimit = it)) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     ToggleRow(
                         title = strings.allowSafetyTitle,
                         subtitle = strings.allowSafetySubtitle,
                         checked = config.allowSafetyLimits,
                         onCheckedChange = { onUpdateConfig(config.copy(allowSafetyLimits = it)) },
                     )
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
                     ToggleRow(
                         title = strings.respectLowPowerTitle,
                         subtitle = strings.respectLowPowerSubtitle,
@@ -591,6 +720,128 @@ private fun FrameLockerScreen(
             }
         }
     }
+
+    if (showAboutDialog) {
+        FrameLockerAboutDialog(onDismiss = { showAboutDialog = false })
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun FrameLockerAboutDialog(onDismiss: () -> Unit) {
+    val strings = LocalAppStrings.current
+    val context = LocalContext.current
+    val appIconBitmap = remember(context) {
+        context.packageManager.getApplicationIcon(context.applicationInfo)
+            .toBitmap(width = 144, height = 144)
+            .asImageBitmap()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.aboutTitle) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(
+                        bitmap = appIconBitmap,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = strings.appTitle,
+                            style = MaterialTheme.typography.titleLargeEmphasized,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                        ) {
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME}",
+                                style = MaterialTheme.typography.labelMediumEmphasized,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+
+                Card(
+                    shape = MaterialTheme.shapes.large,
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.large)
+                        .combinedClickable(
+                            onClick = {
+                                onDismiss()
+                                openRepoUrl(context, strings.aboutRepoUrl, strings.aboutOpenFailed)
+                            },
+                            onLongClick = {
+                                copyToClipboard(context, "ColorOSFrameLocker_Repo", strings.aboutRepoUrl)
+                                Toast.makeText(context, strings.aboutLinkCopied, Toast.LENGTH_SHORT).show()
+                            },
+                        ),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp),
+                        ) {
+                            Text(
+                                text = strings.aboutRepoTitle,
+                                style = MaterialTheme.typography.labelLargeEmphasized,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = strings.aboutRepoUrl,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        Icon(
+                            painter = painterResource(R.drawable.ic_open_in_new_24),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+    )
+}
+
+private fun openRepoUrl(context: Context, url: String, fallbackMsg: String) {
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+    val opened = runCatching { context.startActivity(intent) }.isSuccess
+    if (!opened) {
+        copyToClipboard(context, "ColorOSFrameLocker_Repo", url)
+        Toast.makeText(context, fallbackMsg, Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun copyToClipboard(context: Context, label: String, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -598,15 +849,14 @@ private fun FrameLockerScreen(
 private fun ChipFlowRow(
     content: @Composable FlowRowScope.() -> Unit,
 ) {
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            content = content,
-        )
-    }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ToggleRow(
     title: String,
@@ -615,7 +865,9 @@ private fun ToggleRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -624,7 +876,7 @@ private fun ToggleRow(
                 .weight(1f)
                 .padding(end = 12.dp),
         ) {
-            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            Text(text = title, style = MaterialTheme.typography.titleSmallEmphasized)
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
@@ -632,8 +884,6 @@ private fun ToggleRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 36.dp) {
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
-        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

@@ -30,6 +30,7 @@ data class AppStrings(
     val statusNotBound: String,
     val statusMissingSystem: String,
     val statusActive: String,
+    val statusActiveBody: String,
     val liveDisplayTitle: String,
     val frameworkMissingTitle: String,
     val scopeRequiredTitle: String,
@@ -62,6 +63,11 @@ data class AppStrings(
     val allowSafetySubtitle: String,
     val respectLowPowerTitle: String,
     val respectLowPowerSubtitle: String,
+    val aboutTitle: String,
+    val aboutRepoTitle: String,
+    val aboutRepoUrl: String,
+    val aboutLinkCopied: String,
+    val aboutOpenFailed: String,
 )
 
 private val ZhStrings = AppStrings(
@@ -72,6 +78,7 @@ private val ZhStrings = AppStrings(
     statusNotBound = "未接入框架",
     statusMissingSystem = "缺少 system",
     statusActive = "已激活",
+    statusActiveBody = "已接管 system_server 刷新率策略",
     liveDisplayTitle = "实时屏幕",
     frameworkMissingTitle = "尚未检测到 LSPosed 服务",
     scopeRequiredTitle = "需要勾选系统框架 (system) 作用域",
@@ -104,6 +111,11 @@ private val ZhStrings = AppStrings(
     allowSafetySubtitle = "遇 DC 调光、截屏保护时退让；AOD 与指纹始终优先",
     respectLowPowerTitle = "系统省电自动暂停",
     respectLowPowerSubtitle = "开启系统省电模式时自动暂停锁高刷",
+    aboutTitle = "关于",
+    aboutRepoTitle = "源代码仓库",
+    aboutRepoUrl = "https://github.com/yukino1111/ColorOSFrameLocker",
+    aboutLinkCopied = "仓库链接已复制到剪贴板",
+    aboutOpenFailed = "未找到可用浏览器，链接已复制到剪贴板",
 )
 
 private val EnStrings = AppStrings(
@@ -114,6 +126,7 @@ private val EnStrings = AppStrings(
     statusNotBound = "Inactive",
     statusMissingSystem = "No system",
     statusActive = "Active",
+    statusActiveBody = "system_server refresh-rate policy hook active",
     liveDisplayTitle = "Live Display",
     frameworkMissingTitle = "LSPosed Service Not Detected",
     scopeRequiredTitle = "System Framework (system) Scope Required",
@@ -146,6 +159,11 @@ private val EnStrings = AppStrings(
     allowSafetySubtitle = "Yield to DC dimming and secure display; AOD & FOD always win",
     respectLowPowerTitle = "Pause on Battery Saver",
     respectLowPowerSubtitle = "Automatically pause refresh rate locking in Battery Saver mode",
+    aboutTitle = "About",
+    aboutRepoTitle = "Source Repository",
+    aboutRepoUrl = "https://github.com/yukino1111/ColorOSFrameLocker",
+    aboutLinkCopied = "Repository URL copied to clipboard",
+    aboutOpenFailed = "No browser found, URL copied to clipboard",
 )
 
 fun stringsFor(language: AppLanguage): AppStrings =
